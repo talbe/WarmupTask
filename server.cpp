@@ -1,129 +1,96 @@
-#include <iostream>
-#include <stdio.h> 
-#include <stdlib.h> 
-#include <unistd.h> 
-#include <string.h> 
-#include <sys/types.h> 
-#include <sys/socket.h> 
-#include <arpa/inet.h> 
-#include <netinet/in.h> 
-#include "ThreadPool.h"
-#include "common_data.h"
+#include "server.h"
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
 #include <chrono>
 #include <sys/utsname.h>
 #include <ctime>
 #include <iomanip>
 
-#define PORT     1056 
-#define MAXLINE 1024 
-using namespace std;
-
-struct client_info
+void server::run()
 {
-	int sockfd;
-	struct sockaddr_in cliaddr;
-	int addressLen;
-	client_parameters params;
-};
+	const int PORT = 1056;
 
-void print(client_info info)
+	// Create and bind udp handler
+	this->udpHandler.init();
+        this->udpHandler.bind_address(PORT);
+	
+	// Wait and handle client requests	
+        while (true)
+        {
+		client_info info;
+
+		// Wait for clients request
+                unsigned short clientPort = this->udpHandler.listen((char*)&info.params, sizeof(info.params));
+
+                info.port = clientPort;
+		info.my_udp_handler = this->udpHandler;
+
+		// Submit task for the thread pool
+                cout << "Task submit " << endl;
+                this->thp.submit(client_req_callback, info);
+        }
+}
+
+static void server::client_req_callback(client_info info)
+{
+	// Generate response
+        string res = generate_response(info.params.command_id);
+
+	// Send the response to the client
+	info.my_udp_handler.send(info.port, res.c_str(), 50);
+	
+	// Keep do that if repeat is true
+        while (info.params.repeat)
+        {
+		res = generate_response(info.params.command_id);
+                info.my_udp_handler.send(info.port, res.c_str(), 50);
+                sleep(info.params.delay);
+        }
+}
+
+static string server::get_time()
+{
+	time_t rawtime;
+        struct tm * timeinfo;
+        char buffer[80];
+
+        time (&rawtime);
+        timeinfo = localtime(&rawtime);
+        strftime(buffer,sizeof(buffer),"%d-%m-%Y %H:%M:%S",timeinfo);
+
+	return buffer;
+}
+
+static string server::get_os()
+{
+	utsname os_info;
+        uname(&os_info);
+	
+	return ((string)os_info.sysname + " -- " + (string)os_info.release);
+}
+
+static string server::generate_response(int command_id)
 {
 	string res;
 
-	switch (info.params.command_id)
-	{
-		case(GET_TIME):
-		{
-			time_t rawtime;
-  			struct tm * timeinfo;
-  			char buffer[80];
+	switch (command_id)
+        {
+                case(GET_TIME):
+                {
+                        res = get_time();
+                        break;
+                }
+                case(GET_OS):
+                {
+                        res = get_os();
+                        break;
+                }
+                case(GET_HOST_FILE):
+                {
+                        break;
+                }
+        }
 
-  			time (&rawtime);
-  			timeinfo = localtime(&rawtime);
-
-  			strftime(buffer,sizeof(buffer),"%d-%m-%Y %H:%M:%S",timeinfo);
-  			res = buffer;
-
-  			std::cout << "now date is :: " << res << endl;
-
-			break;
-		}
-		case(GET_OS):
-		{
-			utsname os_info;
-			uname(&os_info);
-			
-			res = (string)os_info.sysname + " -- " + (string)os_info.release;
-
-			cout << "os is:: " << res << endl;
-
-			break;
-		}
-		case(GET_HOST_FILE):
-		{
-		}
-	}
-
-	cout << "about to send " << res << endl;
-    	sendto(info.sockfd, (const char *)res.c_str(), 50,  
-        	MSG_CONFIRM, (const struct sockaddr *) &info.cliaddr, info.addressLen); 
-
-	while (info.params.repeat)
-	{
-    		sendto(info.sockfd, (const char *)res.c_str(), 50,  
-        		MSG_CONFIRM, (const struct sockaddr *) &info.cliaddr, info.addressLen); 
-		sleep(info.params.delay);
-	}
-}
-
-int main(int argc, char* argv[])
-{
-	ThreadPool<void (*)(client_info), client_info> th;
-	client_info info;
-	cout <<"Server start" << endl;
-	int sockfd; 
-	char buffer[MAXLINE]; 
-	char *hello = "Hello from server"; 
-	struct sockaddr_in servaddr, cliaddr; 
-     
-	cout << "creating socket file discriptor" << endl;
-	// Creating socket file descriptor 
-	if ( (sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) { 
-       		perror("socket creation failed"); 
-       		exit(EXIT_FAILURE); 
- 	} 
-      
-    	memset(&servaddr, 0, sizeof(servaddr)); 
-	memset(&cliaddr, 0, sizeof(cliaddr)); 
-      
- 	// Filling server information 
-   	servaddr.sin_family    = AF_INET; // IPv4 
-    	servaddr.sin_addr.s_addr = INADDR_ANY; 
-    	servaddr.sin_port = htons(PORT); 
-      
-	cout << "Binding address" << endl;
-    	// Bind the socket with the server address 
-    	if ( bind(sockfd, (const struct sockaddr *)&servaddr,  
-           	sizeof(servaddr)) < 0 ) 
-    	{ 
-        	perror("bind failed"); 
-        	exit(EXIT_FAILURE); 
-    	} 
-      
-	while (true)
-	{	
-		cout << "Waiting for clients" << endl;
-    		int len, n; 
-    		n = recvfrom(sockfd, (void *)&info.params, sizeof(info.params),  
-                		MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len); 
-		
-		print_buffer((char*)&info.params, sizeof(info.params));
-		info.sockfd = sockfd;
-		info.cliaddr = cliaddr;
-		info.addressLen = len;
-		cout << "Task submit " << endl;
-		th.submit(print, info);
-	}
-
-	return 1;
+	return res;
 }

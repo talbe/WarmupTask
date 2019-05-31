@@ -1,3 +1,6 @@
+#ifndef _COMMON_DATA
+#define _COMMON_DATA
+
 #include <iostream>
 
 struct client_parameters
@@ -14,7 +17,7 @@ enum commands
 	GET_HOST_FILE
 };
 
-void print_buffer(char* buff, int len)
+void inline print_buffer(char* buff, int len)
 {
         for (int i = 0; i < len; i++)
         {
@@ -24,3 +27,4 @@ void print_buffer(char* buff, int len)
         printf("\n");
 }
 
+#endif
